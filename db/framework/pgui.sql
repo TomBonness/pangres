@@ -6,7 +6,17 @@ create schema if not exists pgui;
 ------------------------------------------------------------------- HTML DSL
 -- Safe-HTML type: a value of pgui.html is already escaped/trusted markup.
 -- The only way to get untrusted text in is pgui.text() (escapes) or pgui.raw() (explicit trust).
-create domain pgui.html as text;
+do $pgui$
+begin
+  create domain pgui.html as text;
+exception when duplicate_object then
+  null;
+end
+$pgui$;
+
+create or replace function pgui.version() returns text language sql immutable as $$
+  select '0.1.0'
+$$;
 
 create or replace function pgui.esc(t text) returns text language sql immutable as $$
   select replace(replace(replace(replace(replace(coalesce(t,''),
@@ -44,15 +54,21 @@ create or replace function pgui.tag(name text, attrs jsonb default '{}'::jsonb,
 $$;
 
 -- Page shell / layout: doctype + head (htmx + Pico CSS) + <main>body</main>.
-create or replace function pgui.doc(body pgui.html, title text default 'pgui',
-                                    head pgui.html default ''::pgui.html)
-  returns pgui.html language sql immutable as $$
+drop function if exists pgui.doc(pgui.html, text, pgui.html);
+create or replace function pgui.doc(
+  body pgui.html,
+  title text default 'pgui',
+  head pgui.html default ''::pgui.html,
+  include_defaults boolean default true
+) returns pgui.html language sql immutable as $$
   select pgui.raw(
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'||
     '<meta name="viewport" content="width=device-width, initial-scale=1">'||
     '<title>'||pgui.esc(title)||'</title>'||
-    '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">'||
-    '<script src="https://unpkg.com/htmx.org@2"></script>'||
+    case when include_defaults then
+      '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">'||
+      '<script src="https://unpkg.com/htmx.org@2"></script>'
+    else '' end ||
     head||'</head><body><main class="container">'||body||'</main></body></html>')
 $$;
 
@@ -90,3 +106,20 @@ create or replace procedure pgui.route(path text, handler regproc) language sql 
   insert into omni_httpd.urlpattern_router (match, handler)
   values (omni_httpd.urlpattern(pathname => path), handler);
 $$;
+
+-------------------------------------------------------------------- METADATA COMMENTS
+comment on schema pgui is 'pgui web framework schema containing rendering, request, response, and routing utilities.';
+comment on domain pgui.html is 'Safe HTML domain wrapper to prevent XSS injection.';
+comment on function pgui.version() is 'Returns the current version of the pgui framework.';
+comment on function pgui.esc(text) is 'Escapes special characters in text for safe inclusion in HTML.';
+comment on function pgui.text(text) is 'Converts raw text into safe HTML by escaping special characters.';
+comment on function pgui.raw(text) is 'Explicitly trusts a text string as pre-escaped safe HTML.';
+comment on function pgui.frag(pgui.html[]) is 'Combines multiple HTML fragments into a single HTML structure.';
+comment on function pgui.attrs(jsonb) is 'Transforms a JSONB object into a string of HTML attribute declarations.';
+comment on function pgui.tag(text, jsonb, pgui.html[]) is 'Builds an HTML tag with the specified name, attributes, and children.';
+comment on function pgui.doc(pgui.html, text, pgui.html, boolean) is 'Generates a full HTML document layout with head, title, and body elements.';
+comment on function pgui.query(omni_httpd.http_request, text) is 'Retrieves a query string parameter by key from an HTTP request.';
+comment on function pgui.form(omni_httpd.http_request, text) is 'Retrieves a form field value by key from a POST request body.';
+comment on function pgui.respond_html(pgui.html, integer) is 'Creates an HTTP HTML response with content-type header and status code.';
+comment on function pgui.redirect(text, integer) is 'Creates an HTTP redirect response with a location header and status code.';
+comment on procedure pgui.route(text, regproc) is 'Registers a path pattern to a specific request handler function.';

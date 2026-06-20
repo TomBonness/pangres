@@ -9,9 +9,10 @@ create or replace function app.guestbook_list() returns pgui.html language sql s
           pgui.text(g.author||' · '||to_char(g.created_at,'HH24:MI:SS'))),
         pgui.text(g.body),
         pgui.tag('button',
-          jsonb_build_object('class','secondary','hx-post','/messages/delete',
+          jsonb_build_object('type','button','class','secondary','hx-post','/messages/delete',
             'hx-vals', json_build_object('id', g.id)::text,
-            'hx-target','#list','hx-swap','innerHTML'),
+            'hx-target','#list','hx-swap','innerHTML',
+            'aria-label', 'Delete message from ' || g.author),
           pgui.text('delete'))
       ) order by g.id desc))
   end
@@ -27,12 +28,16 @@ create or replace function app.home(request omni_httpd.http_request)
       pgui.tag('form',
         jsonb_build_object('hx-post','/messages','hx-target','#list','hx-swap','innerHTML',
                            'hx-on::after-request','this.reset()'),
-        pgui.tag('input', jsonb_build_object('name','author','placeholder','name')),
-        pgui.tag('input', jsonb_build_object('name','body','placeholder','message','required','')),
+        pgui.tag('label', jsonb_build_object('for','author'), pgui.text('Name')),
+        pgui.tag('input', jsonb_build_object('id','author','name','author','autocomplete','name','placeholder','Ada')),
+        pgui.tag('label', jsonb_build_object('for','body'), pgui.text('Message')),
+        pgui.tag('input', jsonb_build_object('id','body','name','body','required','','aria-describedby','message-help','placeholder','Write a message')),
+        pgui.tag('small', jsonb_build_object('id','message-help'), pgui.text('Required. Plain text is escaped before display.')),
         pgui.tag('button', jsonb_build_object('type','submit'), pgui.text('Post'))),
       pgui.tag('div',
         jsonb_build_object('id','list','hx-get','/messages',
-                           'hx-trigger','load, every 3s','hx-swap','innerHTML'),
+                           'hx-trigger','load, every 3s','hx-swap','innerHTML',
+                           'role','status','aria-live','polite'),
         app.guestbook_list())),
     'pgui guestbook'));
 $$;

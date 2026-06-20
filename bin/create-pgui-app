@@ -1,0 +1,85 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 APP_NAME [TARGET_DIR]" >&2
+  exit 1
+fi
+
+APP_NAME="$1"
+TARGET_DIR="${2:-$APP_NAME}"
+
+# Validate APP_NAME
+case "$APP_NAME" in
+  *[!A-Za-z0-9_-]*)
+    echo "APP_NAME must start with a letter and contain only letters, numbers, underscores, and hyphens" >&2
+    exit 1
+    ;;
+  [A-Za-z]*)
+    # Valid name
+    ;;
+  *)
+    echo "APP_NAME must start with a letter and contain only letters, numbers, underscores, and hyphens" >&2
+    exit 1
+    ;;
+  esac
+
+# Check for existing non-empty directory
+if [ -d "$TARGET_DIR" ]; then
+  files_exist=0
+  for f in "$TARGET_DIR"/* "$TARGET_DIR"/.* ; do
+    case "$f" in
+      */*)
+        base="${f##*/}"
+        if [ "$base" != "." ] && [ "$base" != ".." ] && [ -e "$f" ]; then
+          files_exist=1
+          break
+        fi
+        ;;
+    esac
+  done
+  if [ "$files_exist" = "1" ]; then
+    echo "Error: Directory '$TARGET_DIR' exists and is not empty." >&2
+    exit 1
+  fi
+fi
+
+# Locate templates/basic in the workspace
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(dirname "$SCRIPT_DIR")
+
+if [ ! -d "$REPO_ROOT/templates/basic" ]; then
+  echo "Error: Could not find templates/basic directory at $REPO_ROOT/templates/basic" >&2
+  exit 1
+fi
+
+mkdir -p "$TARGET_DIR"
+cp -R "$REPO_ROOT/templates/basic/." "$TARGET_DIR/"
+
+mkdir -p "$TARGET_DIR/db/framework"
+cp -R "$REPO_ROOT/db/framework/." "$TARGET_DIR/db/framework/"
+
+# Helper function to replace token
+replace_token() {
+  file_path="$1"
+  token_str="$2"
+  repl_str="$3"
+  if [ -f "$file_path" ]; then
+    sed "s/$token_str/$repl_str/g" "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
+  fi
+}
+
+# Replace tokens
+replace_token "$TARGET_DIR/README.md" "__PGUI_APP_NAME__" "$APP_NAME"
+replace_token "$TARGET_DIR/verify.sh" "__PGUI_APP_NAME__" "$APP_NAME"
+replace_token "$TARGET_DIR/db/app/handlers.sql" "__PGUI_APP_NAME__" "$APP_NAME"
+
+# Ensure scripts are executable
+chmod +x "$TARGET_DIR/run.sh"
+chmod +x "$TARGET_DIR/verify.sh"
+
+echo "Created $TARGET_DIR"
+echo "Next:"
+echo "  cd $TARGET_DIR"
+echo "  ./run.sh"
+echo "  ./verify.sh"

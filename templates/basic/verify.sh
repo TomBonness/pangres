@@ -79,6 +79,7 @@ if [ "$VERIFY_TARGET" = "framework" ] || [ "$VERIFY_TARGET" = "all" ]; then
     echo "Error: $MISSING_ROUTINES_COUNT expected pgui routines/signatures are missing." >&2
     exit 1
   fi
+
   # 3. Confirm behavior with SQL assertions
   SQL_BEHAVIOR_FAILURES=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "
     select count(*) from (
@@ -101,69 +102,35 @@ fi
 
 # ==================== DEMO MODE ====================
 if [ "$VERIFY_TARGET" = "demo" ] || [ "$VERIFY_TARGET" = "all" ]; then
-  echo "Verifying demo..."
+  echo "Verifying app..."
 
-  # 1. Confirm exact route mappings
+  # 1. Confirm route mappings
   ROUTE_MAPPINGS_COUNT=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "
     select count(*) from omni_httpd.urlpattern_router
     where ((match).pathname = '/' and handler::regproc::text = 'app.home')
-       or ((match).pathname = '/messages' and handler::regproc::text = 'app.messages')
-       or ((match).pathname = '/messages/delete' and handler::regproc::text = 'app.delete_message');
+       or ((match).pathname = '/health' and handler::regproc::text = 'app.health');
   ")
   TOTAL_ROUTES=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "select count(*) from omni_httpd.urlpattern_router;")
   
-  if [ "$ROUTE_MAPPINGS_COUNT" -ne 3 ] || [ "$TOTAL_ROUTES" -ne 3 ]; then
-    echo "Error: Route mappings do not match expected pgui demo routes." >&2
+  if [ "$ROUTE_MAPPINGS_COUNT" -ne 2 ] || [ "$TOTAL_ROUTES" -ne 2 ]; then
+    echo "Error: Route mappings do not match expected app routes." >&2
     exit 1
   fi
 
-  # 2. Get root page and check headers and HTML accessibility tags
+  # 2. GET / and verify
   PAGE=$(curl -sS -i "$BASE_URL/")
   contains "$PAGE" "HTTP/1.1 200"
-  
-  # Check content-type case-insensitively
-  PAGE_LOWER=$(echo "$PAGE" | tr '[:upper:]' '[:lower:]')
-  contains "$PAGE_LOWER" "content-type: text/html; charset=utf-8"
-  
-  contains "$PAGE" "<title>pgui guestbook</title>"
-  contains "$PAGE" "<label for=\"author\">Name</label>"
-  contains "$PAGE" "<label for=\"body\">Message</label>"
-  contains "$PAGE" "aria-live=\"polite\""
-  contains "$PAGE" "role=\"status\""
+  contains "$PAGE" "<title>__PGUI_APP_NAME__</title>"
+  contains "$PAGE" "<h1>__PGUI_APP_NAME__</h1>"
+  contains "$PAGE" "Built with pgui."
+  contains "$PAGE" "href=\"/health\""
 
-  # 3. Create unique token and test POST -> list -> delete cycle
-  TOKEN="pgui-verify-$(date +%s)-$$"
-  
-  # POST to /messages
-  POSTED=$(curl -sS -X POST --data-urlencode 'author=Ada' --data-urlencode "body=$TOKEN" "$BASE_URL/messages")
-  contains "$POSTED" "$TOKEN"
-  contains "$POSTED" "Ada"
+  # 3. GET /health and verify
+  HEALTH=$(curl -sS -i "$BASE_URL/health")
+  contains "$HEALTH" "HTTP/1.1 200"
+  contains "$HEALTH" "ok"
 
-  # GET /messages to confirm it remains
-  LIST=$(curl -sS "$BASE_URL/messages")
-  contains "$LIST" "$TOKEN"
-
-  # XSS safety check
-  XSS=$(curl -sS -X POST --data-urlencode 'author=x' --data-urlencode 'body=<script>alert(1)</script>' "$BASE_URL/messages")
-  contains "$XSS" "&lt;script&gt;alert(1)&lt;/script&gt;"
-  not_contains "$XSS" "<script>alert(1)</script>"
-
-  # Query ID of our token message using SQL
-  MSG_ID=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "select id from app.guestbook where body = '$TOKEN' limit 1;")
-  if [ -z "$MSG_ID" ]; then
-    echo "Error: Failed to find newly inserted message in the database." >&2
-    exit 1
-  fi
-
-  # Delete message via POST /messages/delete
-  DELETED_LIST=$(curl -sS -X POST --data-urlencode "id=$MSG_ID" "$BASE_URL/messages/delete")
-  not_contains "$DELETED_LIST" "$TOKEN"
-
-  # Verify GET /messages does not contain it anymore
-  FINAL_LIST=$(curl -sS "$BASE_URL/messages")
-  not_contains "$FINAL_LIST" "$TOKEN"
-
-  echo "Demo verification: OK"
+  echo "App verification: OK"
 fi
 
 printf 'verify.sh: ok\n'
