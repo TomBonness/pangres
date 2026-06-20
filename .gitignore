@@ -1,0 +1,13 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Ephemeral system/temp paths and local config/secrets
+.env
+.env.local
+.env.*.local
+*.log
+
+# Temp directories
+tmp/
+temp/
